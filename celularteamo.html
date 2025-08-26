@@ -2,12 +2,27 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con giroscopio</title>
+  <title>iPad WhatsApp 3D con giroscopio + zoom manual</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
+    #gyroBtn {
+      position: absolute;
+      top: 20px; left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 24px;
+      background: #25D366;
+      color: #fff;
+      font-size: 20px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
+<button id="gyroBtn">Activar giroscopio</button>
+
 <canvas id="chatCanvas" width="1024" height="2048" style="display:none;"></canvas>
 <audio id="bgMusic" src="musica.mp3" loop></audio>
 
@@ -33,8 +48,6 @@ let currentMsg = -1;
 let ipadOn = false;
 const audio = document.getElementById("bgMusic");
 
-let baseZ = 0; // distancia base de la cámara
-
 init();
 animate();
 
@@ -45,7 +58,12 @@ function init(){
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
+  // OrbitControls solo para zoom/pan
   controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableRotate = false; // ❌ no rotar con los dedos
+  controls.enableZoom = true;    // ✅ permitir zoom
+  controls.enablePan = true;     // ✅ permitir mover la cámara
+  controls.zoomSpeed = 1.2;
 
   const chatCanvas = document.getElementById("chatCanvas");
   ctx = chatCanvas.getContext("2d");
@@ -69,6 +87,7 @@ function init(){
         if(child.name === "screen_screen_0"){
           child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
         }
+        // mantener logo y cámaras
         else if(
           child.name === "Apple001_logo_0" ||
           child.name.includes("camera") ||
@@ -76,8 +95,9 @@ function init(){
           child.name.includes("sensor") ||
           child.name.includes("mic")
         ){
-          return; // mantener logo y cámaras originales
+          return;
         } else {
+          // carcasa
           child.material = new THREE.MeshStandardMaterial({
             color: 0x555555,
             metalness: 0.6,
@@ -90,26 +110,29 @@ function init(){
     window.addEventListener("click", onIpadClick);
   });
 
-  scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
+  const light = new THREE.PointLight(0xffffff, 1.2);
+  light.position.set(10,10,10);
+  scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // habilitar giroscopio
-  if (window.DeviceOrientationEvent) {
-    window.addEventListener("deviceorientation", handleOrientation, true);
-  }
+  // Botón giroscopio
+  document.getElementById("gyroBtn").addEventListener("click", activarGiroscopio);
 }
 
-function centerAndFit(object){
-  const box = new THREE.Box3().setFromObject(object);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  object.position.sub(center);
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const fov = camera.fov * (Math.PI/180);
-  let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
-  camera.position.set(0, size.y*0.5, cameraZ * 3); // 🔹 más alejado
-  baseZ = camera.position.z; // guardamos distancia inicial
-  camera.lookAt(0,0,0);
+function activarGiroscopio(){
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(response => {
+        if (response === 'granted') {
+          window.addEventListener("deviceorientation", handleOrientation, true);
+          document.getElementById("gyroBtn").style.display = "none";
+        }
+      })
+      .catch(console.error);
+  } else {
+    window.addEventListener("deviceorientation", handleOrientation, true);
+    document.getElementById("gyroBtn").style.display = "none";
+  }
 }
 
 function handleOrientation(event){
@@ -117,12 +140,9 @@ function handleOrientation(event){
   let gamma = event.gamma || 0; // izquierda/derecha
   let beta = event.beta || 0;   // adelante/atrás
 
-  // rotar el iPad
-  phone.rotation.y = THREE.MathUtils.degToRad(gamma * 0.6);
-  phone.rotation.x = THREE.MathUtils.degToRad(beta * 0.3);
-
-  // zoom relativo con inclinación
-  camera.position.z = baseZ - beta * 0.2;
+  // ✅ El giroscopio solo controla la rotación del iPad
+  phone.rotation.y = THREE.MathUtils.degToRad(gamma * 1.5);
+  phone.rotation.x = THREE.MathUtils.degToRad(beta * 0.6);
 }
 
 function onIpadClick(event){
@@ -147,8 +167,21 @@ function onIpadClick(event){
   }
 }
 
+function centerAndFit(object){
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  object.position.sub(center);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fov = camera.fov * (Math.PI/180);
+  let cameraZ = Math.abs(maxDim / Math.tan(fov/2)) * 1.5;
+  camera.position.set(0, size.y*0.5, cameraZ);
+  camera.lookAt(0,0,0);
+}
+
 function animate(){
   requestAnimationFrame(animate);
+  controls.update(); // ✅ zoom/pan manual
   renderer.render(scene,camera);
 }
 
@@ -167,6 +200,7 @@ function nextMessage(){
   if(currentMsg >= messages.length) return;
   let msg = messages[currentMsg];
 
+  // indicador escribiendo...
   ctx.fillStyle="#111";
   ctx.fillRect(0,200,1024,1848);
   drawHeader();
