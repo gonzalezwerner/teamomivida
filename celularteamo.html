@@ -2,13 +2,15 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con giroscopio y controles táctiles</title>
+  <title>iPad WhatsApp 3D con escribiendo...</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
 </head>
 <body>
 <canvas id="chatCanvas" width="1024" height="2048" style="display:none;"></canvas>
+
+<!-- 🎶 Música cargada desde jsDelivr -->
 <audio id="bgMusic" src="https://cdn.jsdelivr.net/gh/gonzalezwerner/teamomivida@main/portuamormivida.mp3" loop></audio>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
@@ -33,12 +35,10 @@ let currentMsg = -1;
 let ipadOn = false;
 const audio = document.getElementById("bgMusic");
 
-// valores giroscopio
-let gyroX = 0, gyroY = 0;
-
 init();
 animate();
 
+// ================= INIT =================
 function init(){
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
@@ -46,22 +46,26 @@ function init(){
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  // OrbitControls: dedos controlan zoom + rotación
+  // OrbitControls solo para zoom manual con dedos
   controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableRotate = false; 
   controls.enableZoom = true;
-  controls.enableRotate = true; 
-  controls.enablePan = false;
+  controls.enablePan = true;
+  controls.zoomSpeed = 1.2;
+  controls.minDistance = 5;  
+  controls.maxDistance = 20;  
 
   const chatCanvas = document.getElementById("chatCanvas");
   ctx = chatCanvas.getContext("2d");
   chatTexture = new THREE.CanvasTexture(chatCanvas);
   chatTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  // Pantalla apagada
+  // Pantalla apagada al inicio
   ctx.fillStyle = "#000";
   ctx.fillRect(0,0,chatCanvas.width,chatCanvas.height);
   chatTexture.needsUpdate = true;
 
+  // Cargar modelo iPad
   const loader = new THREE.GLTFLoader();
   loader.load("ipad.glb",(gltf)=>{
     phone = gltf.scene;
@@ -73,7 +77,8 @@ function init(){
       if(child.isMesh){
         if(child.name === "screen_screen_0"){
           child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
-        } else if(
+        }
+        else if(
           child.name === "Apple001_logo_0" ||
           child.name.includes("camera") ||
           child.name.includes("flash") ||
@@ -99,19 +104,34 @@ function init(){
   scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // activar giroscopio
-  if (window.DeviceOrientationEvent) {
-    window.addEventListener("deviceorientation", handleOrientation);
+  activarGiroscopio();
+}
+
+// ================= GIROSCOPIO =================
+function activarGiroscopio(){
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(response => {
+        if (response === 'granted') {
+          window.addEventListener("deviceorientation", handleOrientation, true);
+        }
+      })
+      .catch(console.error);
+  } else {
+    window.addEventListener("deviceorientation", handleOrientation, true);
   }
 }
 
 function handleOrientation(event){
   if(!phone) return;
-  // beta = adelante/atrás, gamma = izquierda/derecha
-  gyroX = THREE.MathUtils.degToRad(event.beta / 6 || 0);
-  gyroY = THREE.MathUtils.degToRad(event.gamma / 6 || 0);
+  let gamma = event.gamma || 0; 
+  let beta = event.beta || 0;   
+
+  phone.rotation.y = THREE.MathUtils.degToRad(gamma * 1.5);
+  phone.rotation.x = THREE.MathUtils.degToRad(beta * 0.6);
 }
 
+// ================= CLICK =================
 function onIpadClick(event){
   if(!phone) return;
   let mouse = new THREE.Vector2(
@@ -134,6 +154,7 @@ function onIpadClick(event){
   }
 }
 
+// ================= AJUSTAR CÁMARA =================
 function centerAndFit(object){
   const box = new THREE.Box3().setFromObject(object);
   const size = box.getSize(new THREE.Vector3());
@@ -141,20 +162,14 @@ function centerAndFit(object){
   object.position.sub(center);
   const maxDim = Math.max(size.x, size.y, size.z);
   const fov = camera.fov * (Math.PI/180);
-  let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
-  camera.position.set(0, size.y*0.5, cameraZ * 2.5);
+  let cameraZ = Math.abs(maxDim / Math.tan(fov/2)) * 1.8;
+  camera.position.set(0, size.y*0.5, cameraZ);
   camera.lookAt(0,0,0);
 }
 
+// ================= LOOP =================
 function animate(){
   requestAnimationFrame(animate);
-
-  // aplicar giroscopio si hay datos
-  if(phone && (gyroX !== 0 || gyroY !== 0)){
-    phone.rotation.x += (gyroX - phone.rotation.x) * 0.1;
-    phone.rotation.y += (gyroY - phone.rotation.y) * 0.1;
-  }
-
   controls.update();
   renderer.render(scene,camera);
 }
@@ -174,6 +189,7 @@ function nextMessage(){
   if(currentMsg >= messages.length) return;
   let msg = messages[currentMsg];
 
+  // escribiendo...
   ctx.fillStyle="#111";
   ctx.fillRect(0,200,1024,1848);
   drawHeader();
@@ -201,6 +217,7 @@ function drawMessages(){
     let bubbleWidth = ctx.measureText(m.text).width + 80;
     let bubbleHeight = 160;
     let x = m.from==="me"? 1024-bubbleWidth-60 : 40;
+
     ctx.fillStyle = m.from==="me" ? "#25D366" : "#fff";
     roundRect(ctx, x, y, bubbleWidth, bubbleHeight, 50, true);
     ctx.fillStyle = m.from==="me" ? "#fff" : "#000";
