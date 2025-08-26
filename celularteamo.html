@@ -2,15 +2,13 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con todo</title>
+  <title>iPad WhatsApp 3D con Giroscopio</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
 </head>
 <body>
 <canvas id="chatCanvas" width="1024" height="2048" style="display:none;"></canvas>
-
-<!-- Música -->
 <audio id="bgMusic" src="https://cdn.jsdelivr.net/gh/gonzalezwerner/teamomivida/portuamormivida.mp3" loop></audio>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
@@ -19,11 +17,11 @@
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
 
 <script>
-let scene, camera, renderer, controls, phone, chatTexture, ctx, listener, audioObj, ipadSpeaker;
+let scene, camera, renderer, controls, phone, chatTexture, ctx;
 let shownMessages = [];
 let messages = [
   { text: "Lo siento😔, sé que no soy", from: "me" },
-  { text: "perfecto 💔", from: "other" },
+  { text: "perfecto. 💔", from: "other" },
   { text: "Pero te amo ❤️", from: "other" },
   { text: "Quiero arreglarlo ❤️", from: "me" },
   { text: "Quiero estar bien contigo 🥺", from: "other" },
@@ -34,45 +32,31 @@ let messages = [
 let currentMsg = -1;
 let ipadOn = false;
 let hearts = [];
+let particles = [];
+const audio = document.getElementById("bgMusic");
 
 init();
 animate();
 
 function init(){
   scene = new THREE.Scene();
-
   camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
   renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.enableZoom = true; // zoom con dedos
 
-  // Sistema de audio
-  listener = new THREE.AudioListener();
-  camera.add(listener);
-  const audioEl = document.getElementById("bgMusic");
-  audioObj = new THREE.Audio(listener);
-  const mediaElement = new Audio(audioEl.src);
-  mediaElement.loop = true;
-  mediaElement.crossOrigin = "anonymous";
-  const mediaElementSource = listener.context.createMediaElementSource(mediaElement);
-  mediaElementSource.connect(listener.context.destination);
-  audioObj.setMediaElementSource(mediaElement);
-
-  // Canvas del chat
   const chatCanvas = document.getElementById("chatCanvas");
   ctx = chatCanvas.getContext("2d");
   chatTexture = new THREE.CanvasTexture(chatCanvas);
+  chatTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
   // Pantalla apagada
   ctx.fillStyle = "#000";
   ctx.fillRect(0,0,chatCanvas.width,chatCanvas.height);
   chatTexture.needsUpdate = true;
 
-  // Cargar iPad
   const loader = new THREE.GLTFLoader();
   loader.load("ipad.glb",(gltf)=>{
     phone = gltf.scene;
@@ -80,16 +64,25 @@ function init(){
     scene.add(phone);
     centerAndFit(phone);
 
-    // Agregar música como audio posicional desde el iPad
-    ipadSpeaker = new THREE.PositionalAudio(listener);
-    phone.add(ipadSpeaker);
-    ipadSpeaker.setMediaElementSource(mediaElement);
-    ipadSpeaker.setRefDistance(2);
-
     phone.traverse((child)=>{
       if(child.isMesh){
         if(child.name === "screen_screen_0"){
           child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
+        }
+        else if(
+          child.name === "Apple001_logo_0" ||
+          child.name.includes("camera") ||
+          child.name.includes("flash") ||
+          child.name.includes("sensor") ||
+          child.name.includes("mic")
+        ){
+          return; // mantener logo/cámaras
+        } else {
+          child.material = new THREE.MeshStandardMaterial({
+            color: 0x555555,
+            metalness: 0.6,
+            roughness: 0.4
+          });
         }
       }
     });
@@ -97,33 +90,63 @@ function init(){
     window.addEventListener("click", onIpadClick);
   });
 
-  // Luces
+  // luces
   const light = new THREE.PointLight(0xffffff, 1.2);
   light.position.set(10,10,10);
   scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // Corazones cayendo
+  // corazones cayendo
   setInterval(()=>{
-    if(!phone) return;
-    let heart = createHeart3D();
-    heart.position.set((Math.random()-0.5)*15, 10, (Math.random()-0.5)*10);
-    scene.add(heart);
-    hearts.push(heart);
+    if(ipadOn){ // solo cuando está encendido
+      let heart = createHeart3D();
+      heart.position.set((Math.random()-0.5)*15, 10, (Math.random()-0.5)*10);
+      heart.scale.set(0.05,0.05,0.05);
+      scene.add(heart);
+      hearts.push(heart);
+    }
   },200);
 
-  // Giroscopio
-  if(window.DeviceOrientationEvent){
-    window.addEventListener("deviceorientation", handleOrientation);
+  // partículas alrededor del iPad
+  for(let i=0;i<100;i++){
+    let particle = new THREE.Mesh(
+      new THREE.SphereGeometry(0.02,8,8),
+      new THREE.MeshBasicMaterial({color:0xffffff})
+    );
+    let angle = Math.random()*Math.PI*2;
+    let radius = 3+Math.random()*2;
+    particle.userData = { angle, radius, speed: 0.002+Math.random()*0.003 };
+    scene.add(particle);
+    particles.push(particle);
   }
 
   window.addEventListener("resize", onResize);
 }
 
-function onIpadClick(event){
-  if(!phone || ipadOn) return;
+function enableGyro(){
+  if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+    // iOS
+    DeviceOrientationEvent.requestPermission().then(response=>{
+      if(response === "granted"){
+        window.addEventListener("deviceorientation", handleOrientation);
+      }
+    });
+  } else {
+    // Android
+    window.addEventListener("deviceorientation", handleOrientation);
+  }
+}
 
-  // Detectar click en pantalla
+function handleOrientation(event){
+  if(!phone) return;
+  let beta = event.beta || 0;   // adelante/atrás
+  let gamma = event.gamma || 0; // izquierda/derecha
+  phone.rotation.x = THREE.MathUtils.degToRad(beta/6);
+  phone.rotation.y = THREE.MathUtils.degToRad(gamma/6);
+}
+
+function onIpadClick(event){
+  if(!phone) return;
   let mouse = new THREE.Vector2(
     (event.clientX / window.innerWidth) * 2 - 1,
     -(event.clientY / window.innerHeight) * 2 + 1
@@ -134,7 +157,8 @@ function onIpadClick(event){
 
   if(intersects.length > 0 && !ipadOn){
     ipadOn = true;
-    ipadSpeaker.play();
+    enableGyro();
+    audio.play();
     shownMessages = [];
     currentMsg = -1;
     ctx.fillStyle="#111";
@@ -142,15 +166,6 @@ function onIpadClick(event){
     drawHeader();
     nextMessage();
   }
-}
-
-function handleOrientation(event){
-  if(!phone) return;
-  let beta = event.beta || 0;   // inclinación adelante/atrás
-  let gamma = event.gamma || 0; // inclinación izquierda/derecha
-
-  phone.rotation.x = beta * (Math.PI/180) * 0.3;
-  phone.rotation.y = gamma * (Math.PI/180) * 0.3;
 }
 
 function centerAndFit(object){
@@ -161,24 +176,42 @@ function centerAndFit(object){
   const maxDim = Math.max(size.x, size.y, size.z);
   const fov = camera.fov * (Math.PI/180);
   let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
-  camera.position.set(0, size.y*0.5, cameraZ * 2);
+  if (/Mobi|Android/i.test(navigator.userAgent)) {
+    camera.position.set(0, size.y*0.5, cameraZ*2.2); // más lejos en móvil
+  } else {
+    camera.position.set(0, size.y*0.5, cameraZ*1.5);
+  }
   camera.lookAt(0,0,0);
+}
+
+function onResize(){
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function animate(){
   requestAnimationFrame(animate);
 
-  // Corazones cayendo
+  // corazones
   hearts.forEach((h,i)=>{
     h.position.y -= 0.05;
     h.rotation.y += 0.05;
+    h.rotation.x += 0.02;
     if(h.position.y < -5){
       scene.remove(h);
       hearts.splice(i,1);
     }
   });
 
-  controls.update();
+  // partículas
+  particles.forEach(p=>{
+    p.userData.angle += p.userData.speed;
+    p.position.x = Math.cos(p.userData.angle)*p.userData.radius;
+    p.position.z = Math.sin(p.userData.angle)*p.userData.radius;
+    p.position.y = Math.sin(Date.now()*0.001+p.userData.angle)*0.5;
+  });
+
   renderer.render(scene,camera);
 }
 
@@ -197,31 +230,35 @@ function nextMessage(){
   if(currentMsg >= messages.length) return;
   let msg = messages[currentMsg];
 
-  // indicador escribiendo...
-  drawAll();
+  // escribiendo...
+  ctx.fillStyle="#111";
+  ctx.fillRect(0,200,1024,1848);
+  drawHeader();
+  drawMessages();
   ctx.fillStyle="#aaa";
   ctx.font="italic 50px Arial";
   ctx.fillText("Escribiendo...", 60, 240 + shownMessages.length*200);
   chatTexture.needsUpdate = true;
 
   setTimeout(()=>{
+    ctx.fillStyle="#111";
+    ctx.fillRect(0,200,1024,1848);
+    drawHeader();
     shownMessages.push(msg);
-    drawAll();
+    drawMessages();
     chatTexture.needsUpdate = true;
     setTimeout(nextMessage,2000);
   },1500);
 }
 
-function drawAll(){
-  ctx.fillStyle="#111";
-  ctx.fillRect(0,200,1024,1848);
-  drawHeader();
+function drawMessages(){
   shownMessages.forEach((m,i)=>{
     let y = 240 + i*200;
     ctx.font = "bold 60px Arial";
     let bubbleWidth = ctx.measureText(m.text).width + 80;
     let bubbleHeight = 160;
     let x = m.from==="me"? 1024-bubbleWidth-60 : 40;
+
     ctx.fillStyle = m.from==="me" ? "#25D366" : "#fff";
     roundRect(ctx, x, y, bubbleWidth, bubbleHeight, 50, true);
     ctx.fillStyle = m.from==="me" ? "#fff" : "#000";
@@ -243,30 +280,6 @@ function roundRect(ctx, x, y, width, height, radius, fill){
   ctx.closePath();
   if(fill) ctx.fill();
 }
-
-function createHeart3D(){
-  const shape = new THREE.Shape();
-  shape.moveTo(5,5);
-  shape.bezierCurveTo(5,5, 4,0, 0,0);
-  shape.bezierCurveTo(-6,0, -6,7, -6,7);
-  shape.bezierCurveTo(-6,11, -3,15.4, 5,19);
-  shape.bezierCurveTo(13,15.4, 16,11, 16,7);
-  shape.bezierCurveTo(16,7, 16,0, 10,0);
-  shape.bezierCurveTo(7,0, 5,5, 5,5);
-
-  const extrudeSettings = { depth:2, bevelEnabled:true, bevelSegments:2, steps:2, bevelSize:1, bevelThickness:1 };
-  const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-  const material = new THREE.MeshPhongMaterial({ color: 0xff0000, shininess: 150 });
-  const heart = new THREE.Mesh(geometry, material);
-  heart.scale.set(0.05,0.05,0.05);
-  return heart;
-}
-  function onResize(){
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
 </script>
 </body>
 </html>
-
