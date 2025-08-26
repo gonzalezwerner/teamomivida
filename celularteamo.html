@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con escribiendo...</title>
+  <title>iPad WhatsApp 3D con escribiendo... y giroscopio</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
@@ -33,9 +33,10 @@ let currentMsg = -1;
 let ipadOn = false;
 const audio = document.getElementById("bgMusic");
 
-// giroscopio
-let orientation = { alpha: 0, beta: 0, gamma: 0 };
+// 🎯 Giroscopio
+let orientation = { beta: 0, gamma: 0 };
 let targetRotation = { x: 0, y: 0 };
+let sensitivity = 0.6; // 🔹 Ajusta este valor (más alto = más sensible)
 
 init();
 animate();
@@ -100,9 +101,8 @@ function init(){
   // capturar giroscopio
   if (window.DeviceOrientationEvent) {
     window.addEventListener("deviceorientation", (e)=>{
-      orientation.alpha = e.alpha || 0;
-      orientation.beta  = e.beta  || 0;
-      orientation.gamma = e.gamma || 0;
+      orientation.beta  = e.beta || 0;  // adelante/atrás
+      orientation.gamma = e.gamma || 0; // izquierda/derecha
     });
   }
 }
@@ -145,13 +145,13 @@ function animate(){
   requestAnimationFrame(animate);
 
   if (phone && ipadOn) {
-    // Usamos solo beta y gamma
-    targetRotation.x = THREE.MathUtils.degToRad(orientation.beta * 0.2);
-    targetRotation.y = THREE.MathUtils.degToRad(orientation.gamma * 0.2);
+    // aplicar giroscopio con sensibilidad
+    targetRotation.x = THREE.MathUtils.degToRad(orientation.beta * sensitivity);
+    targetRotation.y = THREE.MathUtils.degToRad(orientation.gamma * sensitivity);
 
-    // Interpolación suave
-    phone.rotation.x += (targetRotation.x - phone.rotation.x) * 0.05;
-    phone.rotation.y += (targetRotation.y - phone.rotation.y) * 0.05;
+    // interpolación suave
+    phone.rotation.x += (targetRotation.x - phone.rotation.x) * 0.08;
+    phone.rotation.y += (targetRotation.y - phone.rotation.y) * 0.08;
   }
 
   renderer.render(scene,camera);
