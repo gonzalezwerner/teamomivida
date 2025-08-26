@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con audio posicional</title>
+  <title>iPad WhatsApp 3D con todo</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
@@ -10,17 +10,20 @@
 <body>
 <canvas id="chatCanvas" width="1024" height="2048" style="display:none;"></canvas>
 
+<!-- Música -->
+<audio id="bgMusic" src="https://cdn.jsdelivr.net/gh/gonzalezwerner/teamomivida/portuamormivida.mp3" loop></audio>
+
 <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
 
 <script>
-let scene, camera, renderer, controls, phone, chatTexture, ctx;
+let scene, camera, renderer, controls, phone, chatTexture, ctx, listener, audioObj, ipadSpeaker;
 let shownMessages = [];
 let messages = [
   { text: "Lo siento😔, sé que no soy", from: "me" },
-  { text: "perfecto. 💔", from: "other" },
+  { text: "perfecto 💔", from: "other" },
   { text: "Pero te amo ❤️", from: "other" },
   { text: "Quiero arreglarlo ❤️", from: "me" },
   { text: "Quiero estar bien contigo 🥺", from: "other" },
@@ -30,37 +33,46 @@ let messages = [
 ];
 let currentMsg = -1;
 let ipadOn = false;
-
-// 🔊 Audio
-let audioListener, positionalAudio;
+let hearts = [];
 
 init();
 animate();
 
 function init(){
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
 
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
   renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.enableZoom = true; // zoom con dedos
 
-  // 🎧 Listener en la cámara
-  audioListener = new THREE.AudioListener();
-  camera.add(audioListener);
+  // Sistema de audio
+  listener = new THREE.AudioListener();
+  camera.add(listener);
+  const audioEl = document.getElementById("bgMusic");
+  audioObj = new THREE.Audio(listener);
+  const mediaElement = new Audio(audioEl.src);
+  mediaElement.loop = true;
+  mediaElement.crossOrigin = "anonymous";
+  const mediaElementSource = listener.context.createMediaElementSource(mediaElement);
+  mediaElementSource.connect(listener.context.destination);
+  audioObj.setMediaElementSource(mediaElement);
 
+  // Canvas del chat
   const chatCanvas = document.getElementById("chatCanvas");
   ctx = chatCanvas.getContext("2d");
   chatTexture = new THREE.CanvasTexture(chatCanvas);
-  chatTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
   // Pantalla apagada
   ctx.fillStyle = "#000";
   ctx.fillRect(0,0,chatCanvas.width,chatCanvas.height);
   chatTexture.needsUpdate = true;
 
+  // Cargar iPad
   const loader = new THREE.GLTFLoader();
   loader.load("ipad.glb",(gltf)=>{
     phone = gltf.scene;
@@ -68,44 +80,16 @@ function init(){
     scene.add(phone);
     centerAndFit(phone);
 
+    // Agregar música como audio posicional desde el iPad
+    ipadSpeaker = new THREE.PositionalAudio(listener);
+    phone.add(ipadSpeaker);
+    ipadSpeaker.setMediaElementSource(mediaElement);
+    ipadSpeaker.setRefDistance(2);
+
     phone.traverse((child)=>{
       if(child.isMesh){
         if(child.name === "screen_screen_0"){
-          // Pantalla → textura del chat
           child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
-
-          // 🔊 Música como audio posicional pegado a la pantalla
-          const audioLoader = new THREE.AudioLoader();
-          positionalAudio = new THREE.PositionalAudio(audioListener);
-          audioLoader.load(
-            "https://cdn.jsdelivr.net/gh/gonzalezwerner/teamomivida@main/portuamormivida.mp3",
-            (buffer)=>{
-              positionalAudio.setBuffer(buffer);
-              positionalAudio.setRefDistance(1);   // cerca = fuerte
-              positionalAudio.setMaxDistance(20); // lejos = bajo
-              positionalAudio.setLoop(true);
-              positionalAudio.setVolume(1.0);
-              // no empieza hasta hacer click en el iPad
-            }
-          );
-          child.add(positionalAudio);
-        }
-        // mantener logo y cámaras sin cambios
-        else if(
-          child.name === "Apple001_logo_0" ||
-          child.name.includes("camera") ||
-          child.name.includes("flash") ||
-          child.name.includes("sensor") ||
-          child.name.includes("mic")
-        ){
-          return;
-        } else {
-          // carcasa
-          child.material = new THREE.MeshStandardMaterial({
-            color: 0x555555,
-            metalness: 0.6,
-            roughness: 0.4
-          });
         }
       }
     });
@@ -113,12 +97,33 @@ function init(){
     window.addEventListener("click", onIpadClick);
   });
 
-  scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
+  // Luces
+  const light = new THREE.PointLight(0xffffff, 1.2);
+  light.position.set(10,10,10);
+  scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
+
+  // Corazones cayendo
+  setInterval(()=>{
+    if(!phone) return;
+    let heart = createHeart3D();
+    heart.position.set((Math.random()-0.5)*15, 10, (Math.random()-0.5)*10);
+    scene.add(heart);
+    hearts.push(heart);
+  },200);
+
+  // Giroscopio
+  if(window.DeviceOrientationEvent){
+    window.addEventListener("deviceorientation", handleOrientation);
+  }
+
+  window.addEventListener("resize", onResize);
 }
 
 function onIpadClick(event){
-  if(!phone) return;
+  if(!phone || ipadOn) return;
+
+  // Detectar click en pantalla
   let mouse = new THREE.Vector2(
     (event.clientX / window.innerWidth) * 2 - 1,
     -(event.clientY / window.innerHeight) * 2 + 1
@@ -129,7 +134,7 @@ function onIpadClick(event){
 
   if(intersects.length > 0 && !ipadOn){
     ipadOn = true;
-    if(positionalAudio && !positionalAudio.isPlaying) positionalAudio.play();
+    ipadSpeaker.play();
     shownMessages = [];
     currentMsg = -1;
     ctx.fillStyle="#111";
@@ -137,6 +142,15 @@ function onIpadClick(event){
     drawHeader();
     nextMessage();
   }
+}
+
+function handleOrientation(event){
+  if(!phone) return;
+  let beta = event.beta || 0;   // inclinación adelante/atrás
+  let gamma = event.gamma || 0; // inclinación izquierda/derecha
+
+  phone.rotation.x = beta * (Math.PI/180) * 0.3;
+  phone.rotation.y = gamma * (Math.PI/180) * 0.3;
 }
 
 function centerAndFit(object){
@@ -147,12 +161,24 @@ function centerAndFit(object){
   const maxDim = Math.max(size.x, size.y, size.z);
   const fov = camera.fov * (Math.PI/180);
   let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
-  camera.position.set(0, size.y*0.5, cameraZ * 2.0); // más alejado por defecto
+  camera.position.set(0, size.y*0.5, cameraZ * 2);
   camera.lookAt(0,0,0);
 }
 
 function animate(){
   requestAnimationFrame(animate);
+
+  // Corazones cayendo
+  hearts.forEach((h,i)=>{
+    h.position.y -= 0.05;
+    h.rotation.y += 0.05;
+    if(h.position.y < -5){
+      scene.remove(h);
+      hearts.splice(i,1);
+    }
+  });
+
+  controls.update();
   renderer.render(scene,camera);
 }
 
@@ -172,35 +198,30 @@ function nextMessage(){
   let msg = messages[currentMsg];
 
   // indicador escribiendo...
-  ctx.fillStyle="#111";
-  ctx.fillRect(0,200,1024,1848);
-  drawHeader();
-  drawMessages(); // volver a dibujar los anteriores
+  drawAll();
   ctx.fillStyle="#aaa";
   ctx.font="italic 50px Arial";
   ctx.fillText("Escribiendo...", 60, 240 + shownMessages.length*200);
   chatTexture.needsUpdate = true;
 
-  // después de 1.5s mostrar el mensaje real
   setTimeout(()=>{
-    ctx.fillStyle="#111";
-    ctx.fillRect(0,200,1024,1848);
-    drawHeader();
     shownMessages.push(msg);
-    drawMessages();
+    drawAll();
     chatTexture.needsUpdate = true;
     setTimeout(nextMessage,2000);
   },1500);
 }
 
-function drawMessages(){
+function drawAll(){
+  ctx.fillStyle="#111";
+  ctx.fillRect(0,200,1024,1848);
+  drawHeader();
   shownMessages.forEach((m,i)=>{
     let y = 240 + i*200;
     ctx.font = "bold 60px Arial";
     let bubbleWidth = ctx.measureText(m.text).width + 80;
     let bubbleHeight = 160;
     let x = m.from==="me"? 1024-bubbleWidth-60 : 40;
-
     ctx.fillStyle = m.from==="me" ? "#25D366" : "#fff";
     roundRect(ctx, x, y, bubbleWidth, bubbleHeight, 50, true);
     ctx.fillStyle = m.from==="me" ? "#fff" : "#000";
@@ -221,6 +242,24 @@ function roundRect(ctx, x, y, width, height, radius, fill){
   ctx.quadraticCurveTo(x,y,x+radius,y);
   ctx.closePath();
   if(fill) ctx.fill();
+}
+
+function createHeart3D(){
+  const shape = new THREE.Shape();
+  shape.moveTo(5,5);
+  shape.bezierCurveTo(5,5, 4,0, 0,0);
+  shape.bezierCurveTo(-6,0, -6,7, -6,7);
+  shape.bezierCurveTo(-6,11, -3,15.4, 5,19);
+  shape.bezierCurveTo(13,15.4, 16,11, 16,7);
+  shape.bezierCurveTo(16,7, 16,0, 10,0);
+  shape.bezierCurveTo(7,0, 5,5, 5,5);
+
+  const extrudeSettings = { depth:2, bevelEnabled:true, bevelSegments:2, steps:2, bevelSize:1, bevelThickness:1 };
+  const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+  const material = new THREE.MeshPhongMaterial({ color: 0xff0000, shininess: 150 });
+  const heart = new THREE.Mesh(geometry, material);
+  heart.scale.set(0.05,0.05,0.05);
+  return heart;
 }
 </script>
 </body>
