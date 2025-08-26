@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>iPad WhatsApp 3D con escribiendo...</title>
+  <style>
+    body { margin:0; overflow:hidden; background:#000; }
+  </style>
+</head>
+<body>
+<canvas id="chatCanvas" width="1024" height="2048" style="display:none;"></canvas>
+<audio id="bgMusic" src="musica.mp3" loop></audio>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.146.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.146.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+<script>
+let scene, camera, renderer, controls, phone, chatTexture, ctx;
+let shownMessages = [];
+let messages = [
+  { text: "Lo siento😔, sé que no soy", from: "me" },
+  { text: "perfecto. 💔", from: "other" },
+  { text: "Pero te amo ❤️", from: "other" },
+  { text: "Quiero arreglarlo ❤️", from: "me" },
+  { text: "Quiero estar bien contigo 🥺", from: "other" },
+  { text: "Por favor mi vida 💕", from: "me" },
+  { text: "Te amo 😍", from: "other" },
+  { text: "Princesa hermosa 😍", from: "other" }
+];
+let currentMsg = -1;
+let ipadOn = false;
+const audio = document.getElementById("bgMusic");
+
+init();
+animate();
+
+function init(){
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
+  renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+  const chatCanvas = document.getElementById("chatCanvas");
+  ctx = chatCanvas.getContext("2d");
+  chatTexture = new THREE.CanvasTexture(chatCanvas);
+  chatTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+  // Pantalla apagada
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0,0,chatCanvas.width,chatCanvas.height);
+  chatTexture.needsUpdate = true;
+
+  const loader = new THREE.GLTFLoader();
+  loader.load("ipad.glb",(gltf)=>{
+    phone = gltf.scene;
+    phone.scale.set(0.7,0.7,0.7);
+    scene.add(phone);
+    centerAndFit(phone);
+
+    phone.traverse((child)=>{
+      if(child.isMesh){
+        if(child.name === "screen_screen_0"){
+          child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
+        }
+        // mantener logo y cámaras
+        else if(
+          child.name === "Apple001_logo_0" ||
+          child.name.includes("camera") ||
+          child.name.includes("flash") ||
+          child.name.includes("sensor") ||
+          child.name.includes("mic")
+        ){
+          return;
+        } else {
+          // carcasa
+          child.material = new THREE.MeshStandardMaterial({
+            color: 0x555555,
+            metalness: 0.6,
+            roughness: 0.4
+          });
+        }
+      }
+    });
+
+    window.addEventListener("click", onIpadClick);
+  });
+
+  scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
+  scene.add(new THREE.AmbientLight(0xffffff,0.6));
+
+  // 🔹 DEBUG GIROSCOPIO
+  const debugDiv = document.createElement("div");
+  debugDiv.style.position = "absolute";
+  debugDiv.style.top = "10px";
+  debugDiv.style.left = "10px";
+  debugDiv.style.color = "lime";
+  debugDiv.style.fontSize = "22px";
+  debugDiv.style.background = "rgba(0,0,0,0.6)";
+  debugDiv.style.padding = "8px";
+  debugDiv.style.zIndex = "999";
+  debugDiv.innerText = "Esperando datos...";
+  document.body.appendChild(debugDiv);
+
+  function handleOrientation(event){
+    debugDiv.innerHTML = `
+      β (adelante/atrás): ${event.beta}<br>
+      γ (izquierda/derecha): ${event.gamma}<br>
+      α (brújula): ${event.alpha}
+    `;
+  }
+
+  if (typeof DeviceOrientationEvent.requestPermission === "function") {
+    document.body.addEventListener("click", async ()=>{
+      let res = await DeviceOrientationEvent.requestPermission();
+      if(res==="granted"){
+        window.addEventListener("deviceorientation", handleOrientation);
+      }
+    });
+  } else {
+    window.addEventListener("deviceorientation", handleOrientation);
+  }
+}
+
+function onIpadClick(event){
+  if(!phone) return;
+  let mouse = new THREE.Vector2(
+    (event.clientX / window.innerWidth) * 2 - 1,
+    -(event.clientY / window.innerHeight) * 2 + 1
+  );
+  let raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+  let intersects = raycaster.intersectObject(phone, true);
+
+  if(intersects.length > 0 && !ipadOn){
+    ipadOn = true;
+    audio.play();
+    shownMessages = [];
+    currentMsg = -1;
+    ctx.fillStyle="#111";
+    ctx.fillRect(0,0,1024,2048);
+    drawHeader();
+    nextMessage();
+  }
+}
+
+function centerAndFit(object){
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  object.position.sub(center);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fov = camera.fov * (Math.PI/180);
+  let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
+  camera.position.set(0, size.y*0.5, cameraZ * 1.5);
+  camera.lookAt(0,0,0);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene,camera);
+}
+
+// ================= CHAT =================
+function drawHeader(){
+  ctx.fillStyle = "#075E54";
+  ctx.fillRect(0,0,1024,200);
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 80px Arial";
+  ctx.fillText("Princesa 💕", 40, 100);
+  chatTexture.needsUpdate = true;
+}
+
+function nextMessage(){
+  currentMsg++;
+  if(currentMsg >= messages.length) return;
+  let msg = messages[currentMsg];
+
+  ctx.fillStyle="#111";
+  ctx.fillRect(0,200,1024,1848);
+  drawHeader();
+  drawMessages();
+  ctx.fillStyle="#aaa";
+  ctx.font="italic 50px Arial";
+  ctx.fillText("Escribiendo...", 60, 240 + shownMessages.length*200);
+  chatTexture.needsUpdate = true;
+
+  setTimeout(()=>{
+    ctx.fillStyle="#111";
+    ctx.fillRect(0,200,1024,1848);
+    drawHeader();
+    shownMessages.push(msg);
+    drawMessages();
+    chatTexture.needsUpdate = true;
+    setTimeout(nextMessage,2000);
+  },1500);
+}
+
+function drawMessages(){
+  shownMessages.forEach((m,i)=>{
+    let y = 240 + i*200;
+    ctx.font = "bold 60px Arial";
+    let bubbleWidth = ctx.measureText(m.text).width + 80;
+    let bubbleHeight = 160;
+    let x = m.from==="me"? 1024-bubbleWidth-60 : 40;
+
+    ctx.fillStyle = m.from==="me" ? "#25D366" : "#fff";
+    roundRect(ctx, x, y, bubbleWidth, bubbleHeight, 50, true);
+    ctx.fillStyle = m.from==="me" ? "#fff" : "#000";
+    ctx.fillText(m.text, x+40, y+90);
+  });
+}
+
+function roundRect(ctx, x, y, width, height, radius, fill){
+  ctx.beginPath();
+  ctx.moveTo(x+radius,y);
+  ctx.lineTo(x+width-radius,y);
+  ctx.quadraticCurveTo(x+width,y,x+width,y+radius);
+  ctx.lineTo(x+width,y+height-radius);
+  ctx.quadraticCurveTo(x+width,y+height,x+width-radius,y+height);
+  ctx.lineTo(x+radius,y+height);
+  ctx.quadraticCurveTo(x,y+height,x,y+height-radius);
+  ctx.lineTo(x,y+radius);
+  ctx.quadraticCurveTo(x,y,x+radius,y);
+  ctx.closePath();
+  if(fill) ctx.fill();
+}
+</script>
+</body>
+</html>
