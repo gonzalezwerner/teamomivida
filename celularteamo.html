@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con giroscopio</title>
+  <title>iPad WhatsApp 3D con escribiendo...</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
@@ -31,13 +31,11 @@ let messages = [
 ];
 let currentMsg = -1;
 let ipadOn = false;
+let currentZoom = 3.0; // Zoom inicial
+const baseZoom = 3.0;
+const sensitivityZoom = 0.03;
+const sensitivityRotate = 0.02;
 const audio = document.getElementById("bgMusic");
-
-// Giroscopio
-let orientation = { beta: 0, gamma: 0 };
-let sensitivityRotate = 1.2; // rotación lateral (más alto = más sensible)
-let sensitivityZoom   = 0.05; // zoom (más alto = más sensible)
-let baseZoom = 1.5; // posición Z inicial del iPad
 
 init();
 animate();
@@ -54,8 +52,9 @@ function init(){
   const chatCanvas = document.getElementById("chatCanvas");
   ctx = chatCanvas.getContext("2d");
   chatTexture = new THREE.CanvasTexture(chatCanvas);
+  chatTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  // Pantalla apagada
+  // Pantalla apagada (negra)
   ctx.fillStyle = "#000";
   ctx.fillRect(0,0,chatCanvas.width,chatCanvas.height);
   chatTexture.needsUpdate = true;
@@ -70,8 +69,10 @@ function init(){
     phone.traverse((child)=>{
       if(child.isMesh){
         if(child.name === "screen_screen_0"){
-          child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
-        } else if(
+          child.material = new THREE.MeshBasicMaterial({ map: chatTexture, transparent:true, opacity:1 });
+        }
+        // mantener logo y cámaras
+        else if(
           child.name === "Apple001_logo_0" ||
           child.name.includes("camera") ||
           child.name.includes("flash") ||
@@ -95,12 +96,9 @@ function init(){
   scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // capturar giroscopio
+  // Giroscopio
   if (window.DeviceOrientationEvent) {
-    window.addEventListener("deviceorientation", (e)=>{
-      orientation.beta  = e.beta || 0;  // adelante/atrás
-      orientation.gamma = e.gamma || 0; // izquierda/derecha
-    });
+    window.addEventListener("deviceorientation", handleOrientation);
   }
 }
 
@@ -119,9 +117,19 @@ function onIpadClick(event){
     audio.play();
     shownMessages = [];
     currentMsg = -1;
+
+    // Pantalla encendiéndose (fade in)
     ctx.fillStyle="#111";
     ctx.fillRect(0,0,1024,2048);
     drawHeader();
+    chatTexture.needsUpdate = true;
+
+    phone.traverse((child)=>{
+      if(child.isMesh && child.name === "screen_screen_0"){
+        gsap.fromTo(child.material,{opacity:0},{opacity:1, duration:1.5});
+      }
+    });
+
     nextMessage();
   }
 }
@@ -134,23 +142,27 @@ function centerAndFit(object){
   const maxDim = Math.max(size.x, size.y, size.z);
   const fov = camera.fov * (Math.PI/180);
   let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
-  camera.position.set(0, size.y*0.5, cameraZ * baseZoom);
+  camera.position.set(0, size.y*0.5, currentZoom);
+  camera.lookAt(0,0,0);
+}
+
+function handleOrientation(event){
+  if(!phone) return;
+  let gamma = event.gamma || 0; // izquierda/derecha
+  let beta = event.beta || 0;   // adelante/atrás
+
+  // Rotación lateral
+  phone.rotation.y = THREE.MathUtils.degToRad(gamma * sensitivityRotate);
+
+  // Zoom con inclinación adelante/atrás
+  currentZoom = baseZoom - beta * sensitivityZoom;
+  currentZoom = Math.max(2, Math.min(6, currentZoom));
+  camera.position.set(0, 2, currentZoom);
   camera.lookAt(0,0,0);
 }
 
 function animate(){
   requestAnimationFrame(animate);
-
-  if (phone && ipadOn) {
-    // ROTACIÓN LATERAL
-    let targetY = THREE.MathUtils.degToRad(orientation.gamma * sensitivityRotate);
-    phone.rotation.y += (targetY - phone.rotation.y) * 0.1;
-
-    // ZOOM con inclinación
-    let targetZ = 6 - (orientation.beta * sensitivityZoom); 
-    camera.position.z += (targetZ - camera.position.z) * 0.1;
-  }
-
   renderer.render(scene,camera);
 }
 
@@ -173,12 +185,13 @@ function nextMessage(){
   ctx.fillStyle="#111";
   ctx.fillRect(0,200,1024,1848);
   drawHeader();
-  drawMessages(); 
+  drawMessages();
   ctx.fillStyle="#aaa";
   ctx.font="italic 50px Arial";
   ctx.fillText("Escribiendo...", 60, 240 + shownMessages.length*200);
   chatTexture.needsUpdate = true;
 
+  // mostrar mensaje real
   setTimeout(()=>{
     ctx.fillStyle="#111";
     ctx.fillRect(0,200,1024,1848);
