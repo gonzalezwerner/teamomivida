@@ -33,6 +33,9 @@ let currentMsg = -1;
 let ipadOn = false;
 const audio = document.getElementById("bgMusic");
 
+// --- Variables para giroscopio ---
+let orientation = { alpha: 0, beta: 0, gamma: 0 };
+
 init();
 animate();
 
@@ -93,36 +96,13 @@ function init(){
   scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // 🔹 DEBUG GIROSCOPIO
-  const debugDiv = document.createElement("div");
-  debugDiv.style.position = "absolute";
-  debugDiv.style.top = "10px";
-  debugDiv.style.left = "10px";
-  debugDiv.style.color = "lime";
-  debugDiv.style.fontSize = "22px";
-  debugDiv.style.background = "rgba(0,0,0,0.6)";
-  debugDiv.style.padding = "8px";
-  debugDiv.style.zIndex = "999";
-  debugDiv.innerText = "Esperando datos...";
-  document.body.appendChild(debugDiv);
-
-  function handleOrientation(event){
-    debugDiv.innerHTML = `
-      β (adelante/atrás): ${event.beta}<br>
-      γ (izquierda/derecha): ${event.gamma}<br>
-      α (brújula): ${event.alpha}
-    `;
-  }
-
-  if (typeof DeviceOrientationEvent.requestPermission === "function") {
-    document.body.addEventListener("click", async ()=>{
-      let res = await DeviceOrientationEvent.requestPermission();
-      if(res==="granted"){
-        window.addEventListener("deviceorientation", handleOrientation);
-      }
+  // --- Event listener del giroscopio ---
+  if (window.DeviceOrientationEvent) {
+    window.addEventListener("deviceorientation", e => {
+      orientation.alpha = e.alpha || 0; // giro Z
+      orientation.beta  = e.beta  || 0; // inclinación X
+      orientation.gamma = e.gamma || 0; // inclinación Y
     });
-  } else {
-    window.addEventListener("deviceorientation", handleOrientation);
   }
 }
 
@@ -162,6 +142,14 @@ function centerAndFit(object){
 
 function animate(){
   requestAnimationFrame(animate);
+
+  // --- Aplicar giroscopio al iPad ---
+  if (phone && ipadOn) {
+    phone.rotation.x = THREE.MathUtils.degToRad(orientation.beta * 0.3);
+    phone.rotation.y = THREE.MathUtils.degToRad(orientation.gamma * 0.3);
+    phone.rotation.z = THREE.MathUtils.degToRad(-orientation.alpha * 0.1);
+  }
+
   renderer.render(scene,camera);
 }
 
@@ -180,15 +168,17 @@ function nextMessage(){
   if(currentMsg >= messages.length) return;
   let msg = messages[currentMsg];
 
+  // indicador escribiendo...
   ctx.fillStyle="#111";
   ctx.fillRect(0,200,1024,1848);
   drawHeader();
-  drawMessages();
+  drawMessages(); // volver a dibujar los anteriores
   ctx.fillStyle="#aaa";
   ctx.font="italic 50px Arial";
   ctx.fillText("Escribiendo...", 60, 240 + shownMessages.length*200);
   chatTexture.needsUpdate = true;
 
+  // después de 1.5s mostrar el mensaje real
   setTimeout(()=>{
     ctx.fillStyle="#111";
     ctx.fillRect(0,200,1024,1848);
