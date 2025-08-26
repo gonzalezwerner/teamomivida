@@ -33,8 +33,9 @@ let currentMsg = -1;
 let ipadOn = false;
 const audio = document.getElementById("bgMusic");
 
-// --- Variables para giroscopio ---
+// giroscopio
 let orientation = { alpha: 0, beta: 0, gamma: 0 };
+let targetRotation = { x: 0, y: 0 };
 
 init();
 animate();
@@ -96,12 +97,12 @@ function init(){
   scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // --- Event listener del giroscopio ---
+  // capturar giroscopio
   if (window.DeviceOrientationEvent) {
-    window.addEventListener("deviceorientation", e => {
-      orientation.alpha = e.alpha || 0; // giro Z
-      orientation.beta  = e.beta  || 0; // inclinación X
-      orientation.gamma = e.gamma || 0; // inclinación Y
+    window.addEventListener("deviceorientation", (e)=>{
+      orientation.alpha = e.alpha || 0;
+      orientation.beta  = e.beta  || 0;
+      orientation.gamma = e.gamma || 0;
     });
   }
 }
@@ -143,11 +144,14 @@ function centerAndFit(object){
 function animate(){
   requestAnimationFrame(animate);
 
-  // --- Aplicar giroscopio al iPad ---
   if (phone && ipadOn) {
-    phone.rotation.x = THREE.MathUtils.degToRad(orientation.beta * 0.3);
-    phone.rotation.y = THREE.MathUtils.degToRad(orientation.gamma * 0.3);
-    phone.rotation.z = THREE.MathUtils.degToRad(-orientation.alpha * 0.1);
+    // Usamos solo beta y gamma
+    targetRotation.x = THREE.MathUtils.degToRad(orientation.beta * 0.2);
+    targetRotation.y = THREE.MathUtils.degToRad(orientation.gamma * 0.2);
+
+    // Interpolación suave
+    phone.rotation.x += (targetRotation.x - phone.rotation.x) * 0.05;
+    phone.rotation.y += (targetRotation.y - phone.rotation.y) * 0.05;
   }
 
   renderer.render(scene,camera);
