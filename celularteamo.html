@@ -2,15 +2,13 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con giroscopio + zoom manual</title>
+  <title>iPad WhatsApp 3D con audio posicional</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
 </head>
 <body>
-
 <canvas id="chatCanvas" width="1024" height="2048" style="display:none;"></canvas>
-<audio id="bgMusic" src="musica.mp3" loop></audio>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.146.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -32,39 +30,37 @@ let messages = [
 ];
 let currentMsg = -1;
 let ipadOn = false;
-const audio = document.getElementById("bgMusic");
+
+// 🔊 Audio
+let audioListener, positionalAudio;
 
 init();
 animate();
 
-// ================= INIT =================
 function init(){
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 2000);
+
   renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  // OrbitControls solo para zoom/pan con dedos
   controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableRotate = false; 
-  controls.enableZoom = true;
-  controls.enablePan = true;
-  controls.zoomSpeed = 1.2;
-  controls.minDistance = 5;   // 🔹 límite zoom mínimo
-  controls.maxDistance = 20;  // 🔹 límite zoom máximo
+
+  // 🎧 Listener en la cámara
+  audioListener = new THREE.AudioListener();
+  camera.add(audioListener);
 
   const chatCanvas = document.getElementById("chatCanvas");
   ctx = chatCanvas.getContext("2d");
   chatTexture = new THREE.CanvasTexture(chatCanvas);
   chatTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  // Pantalla apagada al inicio
+  // Pantalla apagada
   ctx.fillStyle = "#000";
   ctx.fillRect(0,0,chatCanvas.width,chatCanvas.height);
   chatTexture.needsUpdate = true;
 
-  // Cargar modelo iPad
   const loader = new THREE.GLTFLoader();
   loader.load("ipad.glb",(gltf)=>{
     phone = gltf.scene;
@@ -75,8 +71,26 @@ function init(){
     phone.traverse((child)=>{
       if(child.isMesh){
         if(child.name === "screen_screen_0"){
+          // Pantalla → textura del chat
           child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
+
+          // 🔊 Música como audio posicional pegado a la pantalla
+          const audioLoader = new THREE.AudioLoader();
+          positionalAudio = new THREE.PositionalAudio(audioListener);
+          audioLoader.load(
+            "https://cdn.jsdelivr.net/gh/gonzalezwerner/teamomivida@main/portuamormivida.mp3",
+            (buffer)=>{
+              positionalAudio.setBuffer(buffer);
+              positionalAudio.setRefDistance(1);   // cerca = fuerte
+              positionalAudio.setMaxDistance(20); // lejos = bajo
+              positionalAudio.setLoop(true);
+              positionalAudio.setVolume(1.0);
+              // no empieza hasta hacer click en el iPad
+            }
+          );
+          child.add(positionalAudio);
         }
+        // mantener logo y cámaras sin cambios
         else if(
           child.name === "Apple001_logo_0" ||
           child.name.includes("camera") ||
@@ -86,6 +100,7 @@ function init(){
         ){
           return;
         } else {
+          // carcasa
           child.material = new THREE.MeshStandardMaterial({
             color: 0x555555,
             metalness: 0.6,
@@ -98,40 +113,10 @@ function init(){
     window.addEventListener("click", onIpadClick);
   });
 
-  const light = new THREE.PointLight(0xffffff, 1.2);
-  light.position.set(10,10,10);
-  scene.add(light);
+  scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
-
-  // 🔹 Activar giroscopio automáticamente
-  activarGiroscopio();
 }
 
-// ================= GIROSCOPIO =================
-function activarGiroscopio(){
-  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission()
-      .then(response => {
-        if (response === 'granted') {
-          window.addEventListener("deviceorientation", handleOrientation, true);
-        }
-      })
-      .catch(console.error);
-  } else {
-    window.addEventListener("deviceorientation", handleOrientation, true);
-  }
-}
-
-function handleOrientation(event){
-  if(!phone) return;
-  let gamma = event.gamma || 0; // izquierda/derecha
-  let beta = event.beta || 0;   // adelante/atrás
-
-  phone.rotation.y = THREE.MathUtils.degToRad(gamma * 1.5);
-  phone.rotation.x = THREE.MathUtils.degToRad(beta * 0.6);
-}
-
-// ================= CLICK =================
 function onIpadClick(event){
   if(!phone) return;
   let mouse = new THREE.Vector2(
@@ -144,7 +129,7 @@ function onIpadClick(event){
 
   if(intersects.length > 0 && !ipadOn){
     ipadOn = true;
-    audio.play();
+    if(positionalAudio && !positionalAudio.isPlaying) positionalAudio.play();
     shownMessages = [];
     currentMsg = -1;
     ctx.fillStyle="#111";
@@ -154,7 +139,6 @@ function onIpadClick(event){
   }
 }
 
-// ================= AJUSTAR CÁMARA =================
 function centerAndFit(object){
   const box = new THREE.Box3().setFromObject(object);
   const size = box.getSize(new THREE.Vector3());
@@ -162,15 +146,13 @@ function centerAndFit(object){
   object.position.sub(center);
   const maxDim = Math.max(size.x, size.y, size.z);
   const fov = camera.fov * (Math.PI/180);
-  let cameraZ = Math.abs(maxDim / Math.tan(fov/2)) * 1.8; // 🔹 un poco más lejos
-  camera.position.set(0, size.y*0.5, cameraZ);
+  let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
+  camera.position.set(0, size.y*0.5, cameraZ * 2.0); // más alejado por defecto
   camera.lookAt(0,0,0);
 }
 
-// ================= LOOP =================
 function animate(){
   requestAnimationFrame(animate);
-  controls.update();
   renderer.render(scene,camera);
 }
 
@@ -189,16 +171,17 @@ function nextMessage(){
   if(currentMsg >= messages.length) return;
   let msg = messages[currentMsg];
 
-  // escribiendo...
+  // indicador escribiendo...
   ctx.fillStyle="#111";
   ctx.fillRect(0,200,1024,1848);
   drawHeader();
-  drawMessages();
+  drawMessages(); // volver a dibujar los anteriores
   ctx.fillStyle="#aaa";
   ctx.font="italic 50px Arial";
   ctx.fillText("Escribiendo...", 60, 240 + shownMessages.length*200);
   chatTexture.needsUpdate = true;
 
+  // después de 1.5s mostrar el mensaje real
   setTimeout(()=>{
     ctx.fillStyle="#111";
     ctx.fillRect(0,200,1024,1848);
