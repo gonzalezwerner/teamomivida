@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con giroscopio</title>
+  <title>iPad WhatsApp 3D con giroscopio y controles táctiles</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
@@ -33,6 +33,9 @@ let currentMsg = -1;
 let ipadOn = false;
 const audio = document.getElementById("bgMusic");
 
+// valores giroscopio
+let gyroX = 0, gyroY = 0;
+
 init();
 animate();
 
@@ -43,9 +46,11 @@ function init(){
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
+  // OrbitControls: dedos controlan zoom + rotación
   controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableZoom = true;   // zoom con dedos
-  controls.enableRotate = false; // rotación deshabilitada → la da el giroscopio
+  controls.enableZoom = true;
+  controls.enableRotate = true; 
+  controls.enablePan = false;
 
   const chatCanvas = document.getElementById("chatCanvas");
   ctx = chatCanvas.getContext("2d");
@@ -68,8 +73,7 @@ function init(){
       if(child.isMesh){
         if(child.name === "screen_screen_0"){
           child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
-        }
-        else if(
+        } else if(
           child.name === "Apple001_logo_0" ||
           child.name.includes("camera") ||
           child.name.includes("flash") ||
@@ -95,7 +99,7 @@ function init(){
   scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // Activar giroscopio
+  // activar giroscopio
   if (window.DeviceOrientationEvent) {
     window.addEventListener("deviceorientation", handleOrientation);
   }
@@ -103,16 +107,9 @@ function init(){
 
 function handleOrientation(event){
   if(!phone) return;
-
-  let beta = event.beta || 0;   // adelante/atrás
-  let gamma = event.gamma || 0; // izquierda/derecha
-
-  let targetX = THREE.MathUtils.degToRad(beta / 6);
-  let targetY = THREE.MathUtils.degToRad(gamma / 6);
-
-  // Suavizado
-  phone.rotation.x += (targetX - phone.rotation.x) * 0.1;
-  phone.rotation.y += (targetY - phone.rotation.y) * 0.1;
+  // beta = adelante/atrás, gamma = izquierda/derecha
+  gyroX = THREE.MathUtils.degToRad(event.beta / 6 || 0);
+  gyroY = THREE.MathUtils.degToRad(event.gamma / 6 || 0);
 }
 
 function onIpadClick(event){
@@ -145,12 +142,19 @@ function centerAndFit(object){
   const maxDim = Math.max(size.x, size.y, size.z);
   const fov = camera.fov * (Math.PI/180);
   let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
-  camera.position.set(0, size.y*0.5, cameraZ * 2.2); // 👈 más lejos para que no se acerque de golpe
+  camera.position.set(0, size.y*0.5, cameraZ * 2.5);
   camera.lookAt(0,0,0);
 }
 
 function animate(){
   requestAnimationFrame(animate);
+
+  // aplicar giroscopio si hay datos
+  if(phone && (gyroX !== 0 || gyroY !== 0)){
+    phone.rotation.x += (gyroX - phone.rotation.x) * 0.1;
+    phone.rotation.y += (gyroY - phone.rotation.y) * 0.1;
+  }
+
   controls.update();
   renderer.render(scene,camera);
 }
