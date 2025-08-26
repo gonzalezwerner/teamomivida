@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>iPad WhatsApp 3D con escribiendo...</title>
+  <title>iPad WhatsApp 3D con giroscopio</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
   </style>
@@ -31,11 +31,9 @@ let messages = [
 ];
 let currentMsg = -1;
 let ipadOn = false;
-let currentZoom = 3.0; // Zoom inicial
-const baseZoom = 3.0;
-const sensitivityZoom = 0.03;
-const sensitivityRotate = 0.02;
 const audio = document.getElementById("bgMusic");
+
+let baseZ = 0; // distancia base de la cámara
 
 init();
 animate();
@@ -54,7 +52,7 @@ function init(){
   chatTexture = new THREE.CanvasTexture(chatCanvas);
   chatTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  // Pantalla apagada (negra)
+  // Pantalla apagada
   ctx.fillStyle = "#000";
   ctx.fillRect(0,0,chatCanvas.width,chatCanvas.height);
   chatTexture.needsUpdate = true;
@@ -69,9 +67,8 @@ function init(){
     phone.traverse((child)=>{
       if(child.isMesh){
         if(child.name === "screen_screen_0"){
-          child.material = new THREE.MeshBasicMaterial({ map: chatTexture, transparent:true, opacity:1 });
+          child.material = new THREE.MeshBasicMaterial({ map: chatTexture });
         }
-        // mantener logo y cámaras
         else if(
           child.name === "Apple001_logo_0" ||
           child.name.includes("camera") ||
@@ -79,7 +76,7 @@ function init(){
           child.name.includes("sensor") ||
           child.name.includes("mic")
         ){
-          return;
+          return; // mantener logo y cámaras originales
         } else {
           child.material = new THREE.MeshStandardMaterial({
             color: 0x555555,
@@ -96,10 +93,36 @@ function init(){
   scene.add(new THREE.PointLight(0xffffff, 1.2).position.set(10,10,10));
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-  // Giroscopio
+  // habilitar giroscopio
   if (window.DeviceOrientationEvent) {
-    window.addEventListener("deviceorientation", handleOrientation);
+    window.addEventListener("deviceorientation", handleOrientation, true);
   }
+}
+
+function centerAndFit(object){
+  const box = new THREE.Box3().setFromObject(object);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  object.position.sub(center);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fov = camera.fov * (Math.PI/180);
+  let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
+  camera.position.set(0, size.y*0.5, cameraZ * 3); // 🔹 más alejado
+  baseZ = camera.position.z; // guardamos distancia inicial
+  camera.lookAt(0,0,0);
+}
+
+function handleOrientation(event){
+  if(!phone) return;
+  let gamma = event.gamma || 0; // izquierda/derecha
+  let beta = event.beta || 0;   // adelante/atrás
+
+  // rotar el iPad
+  phone.rotation.y = THREE.MathUtils.degToRad(gamma * 0.6);
+  phone.rotation.x = THREE.MathUtils.degToRad(beta * 0.3);
+
+  // zoom relativo con inclinación
+  camera.position.z = baseZ - beta * 0.2;
 }
 
 function onIpadClick(event){
@@ -117,48 +140,11 @@ function onIpadClick(event){
     audio.play();
     shownMessages = [];
     currentMsg = -1;
-
-    // Pantalla encendiéndose (fade in)
     ctx.fillStyle="#111";
     ctx.fillRect(0,0,1024,2048);
     drawHeader();
-    chatTexture.needsUpdate = true;
-
-    phone.traverse((child)=>{
-      if(child.isMesh && child.name === "screen_screen_0"){
-        gsap.fromTo(child.material,{opacity:0},{opacity:1, duration:1.5});
-      }
-    });
-
     nextMessage();
   }
-}
-
-function centerAndFit(object){
-  const box = new THREE.Box3().setFromObject(object);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  object.position.sub(center);
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const fov = camera.fov * (Math.PI/180);
-  let cameraZ = Math.abs(maxDim / Math.tan(fov/2));
-  camera.position.set(0, size.y*0.5, currentZoom);
-  camera.lookAt(0,0,0);
-}
-
-function handleOrientation(event){
-  if(!phone) return;
-  let gamma = event.gamma || 0; // izquierda/derecha
-  let beta = event.beta || 0;   // adelante/atrás
-
-  // Rotación lateral
-  phone.rotation.y = THREE.MathUtils.degToRad(gamma * sensitivityRotate);
-
-  // Zoom con inclinación adelante/atrás
-  currentZoom = baseZoom - beta * sensitivityZoom;
-  currentZoom = Math.max(2, Math.min(6, currentZoom));
-  camera.position.set(0, 2, currentZoom);
-  camera.lookAt(0,0,0);
 }
 
 function animate(){
@@ -181,7 +167,6 @@ function nextMessage(){
   if(currentMsg >= messages.length) return;
   let msg = messages[currentMsg];
 
-  // indicador escribiendo...
   ctx.fillStyle="#111";
   ctx.fillRect(0,200,1024,1848);
   drawHeader();
@@ -191,7 +176,6 @@ function nextMessage(){
   ctx.fillText("Escribiendo...", 60, 240 + shownMessages.length*200);
   chatTexture.needsUpdate = true;
 
-  // mostrar mensaje real
   setTimeout(()=>{
     ctx.fillStyle="#111";
     ctx.fillRect(0,200,1024,1848);
