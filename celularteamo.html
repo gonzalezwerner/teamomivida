@@ -35,6 +35,9 @@ let currentMsg = -1;
 let ipadOn = false;
 const audio = document.getElementById("bgMusic");
 
+// 🌸 Corazones
+let hearts = [];
+
 init();
 animate();
 
@@ -105,6 +108,14 @@ function init(){
   scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
   activarGiroscopio();
+
+  // ❤️ Crear corazones cada 300ms
+  setInterval(()=>{
+    let heart = createHeart3D();
+    heart.position.set((Math.random()-0.5)*10, 8, (Math.random()-0.5)*6);
+    scene.add(heart);
+    hearts.push(heart);
+  },300);
 }
 
 // ================= GIROSCOPIO =================
@@ -170,6 +181,17 @@ function centerAndFit(object){
 // ================= LOOP =================
 function animate(){
   requestAnimationFrame(animate);
+
+  // Animar corazones
+  hearts.forEach((h,i)=>{
+    h.position.y -= 0.03;
+    h.rotation.y += 0.04;
+    if(h.position.y < -5){
+      scene.remove(h);
+      hearts.splice(i,1);
+    }
+  });
+
   controls.update();
   renderer.render(scene,camera);
 }
@@ -238,6 +260,22 @@ function roundRect(ctx, x, y, width, height, radius, fill){
   ctx.quadraticCurveTo(x,y,x+radius,y);
   ctx.closePath();
   if(fill) ctx.fill();
+}
+
+// ❤️ Crear corazón 3D
+function createHeart3D(){
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.bezierCurveTo(0, 0, -0.5, -0.5, -1, 0);
+  shape.bezierCurveTo(-2, 1, -2, 3, 0, 4);
+  shape.bezierCurveTo(2, 3, 2, 1, 1, 0);
+  shape.bezierCurveTo(0.5, -0.5, 0, 0, 0, 0);
+
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth:0.3, bevelEnabled:false });
+  const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+  const heart = new THREE.Mesh(geometry, material);
+  heart.scale.set(0.5,0.5,0.5);
+  return heart;
 }
 </script>
 </body>
